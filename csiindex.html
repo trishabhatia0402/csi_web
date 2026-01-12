@@ -9,25 +9,27 @@
     margin: 0;
     font-family: Arial, sans-serif;
     overflow: hidden;
+    background: #f2f2f2;
   }
 
   #toolbar {
     position: fixed;
     top: 10px;
     left: 10px;
-    background: #ffffff;
+    background: white;
     padding: 10px;
-    border-radius: 6px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     z-index: 1000;
+    display: flex;
+    gap: 6px;
+    align-items: center;
   }
 
   #board {
     width: 100vw;
     height: 100vh;
-    background: #f4f4f4;
     position: relative;
-    overflow: hidden;
   }
 
   .pin {
@@ -35,17 +37,30 @@
     background: #fff8b5;
     padding: 10px;
     border-radius: 6px;
-    cursor: grab;
     min-width: 120px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    cursor: grab;
+  }
+
+  .pin.selected {
+    outline: 2px solid #2196f3;
   }
 
   .pin img {
     max-width: 200px;
+    min-width: 120px;
+    height: auto;
     display: block;
+    pointer-events: none;
   }
 
-  .pin button {
+  .pin small {
+    display: block;
+    margin-top: 6px;
+    color: #555;
+  }
+
+  .delete-btn {
     background: red;
     color: white;
     border: none;
@@ -59,20 +74,27 @@
 <body>
 
 <div id="toolbar">
-  <button onclick="addTextPin()">➕ Text Pin</button>
+  <button onclick="addTextPin()">➕ Text</button>
   <input type="file" onchange="addImagePin(event)">
-  <button onclick="undo()">↩ Undo</button>
-  <button onclick="redo()">↪ Redo</button>
+  <button onclick="undo()">↩</button>
+  <button onclick="redo()">↪</button>
+  <button onclick="saveSnapshot()">💾</button>
+  <select id="snapshots" onchange="loadSnapshot(this.value)">
+    <option value="">Load Snapshot</option>
+  </select>
 </div>
 
 <div id="board"></div>
 
 <script>
   const board = document.getElementById("board");
+  const snapshotSelect = document.getElementById("snapshots");
 
   let pins = JSON.parse(localStorage.getItem("pins")) || [];
   let history = [];
   let future = [];
+  let snapshots = JSON.parse(localStorage.getItem("snapshots")) || [];
+  let selectedPinId = null;
 
   function save() {
     localStorage.setItem("pins", JSON.stringify(pins));
@@ -98,12 +120,16 @@
   }
 
   function addTextPin() {
+    const text = prompt("Enter pin text");
+    if (!text) return;
+
     snapshot();
     pins.push({
       id: Date.now(),
       x: 100,
       y: 100,
-      text: prompt("Enter text")
+      text,
+      tags: prompt("Tags (comma separated)")?.split(",").map(t => t.trim()) || []
     });
     save();
     render();
@@ -120,7 +146,8 @@
         id: Date.now(),
         x: 150,
         y: 150,
-        image: reader.result
+        image: reader.result,
+        tags: prompt("Tags (comma separated)")?.split(",").map(t => t.trim()) || []
       });
       save();
       render();
@@ -131,8 +158,36 @@
   function deletePin(id) {
     snapshot();
     pins = pins.filter(p => p.id !== id);
+    selectedPinId = null;
     save();
     render();
+  }
+
+  function saveSnapshot() {
+    const name = prompt("Snapshot name:");
+    if (!name) return;
+
+    snapshots.push({
+      name,
+      state: JSON.stringify(pins)
+    });
+
+    localStorage.setItem("snapshots", JSON.stringify(snapshots));
+    updateSnapshotDropdown();
+  }
+
+  function loadSnapshot(index) {
+    if (index === "") return;
+    snapshot();
+    pins = JSON.parse(snapshots[index].state);
+    render();
+  }
+
+  function updateSnapshotDropdown() {
+    snapshotSelect.innerHTML = `<option value="">Load Snapshot</option>`;
+    snapshots.forEach((s, i) => {
+      snapshotSelect.innerHTML += `<option value="${i}">${s.name}</option>`;
+    });
   }
 
   function render() {
@@ -142,15 +197,19 @@
       el.className = "pin";
       el.style.left = pin.x + "px";
       el.style.top = pin.y + "px";
-      el.dataset.id = pin.id;
+
+      if (pin.id === selectedPinId) el.classList.add("selected");
 
       const del = document.createElement("button");
       del.textContent = "x";
+      del.className = "delete-btn";
       del.onclick = () => deletePin(pin.id);
       el.appendChild(del);
 
       if (pin.text) {
-        el.innerHTML += `<p>${pin.text}</p>`;
+        const p = document.createElement("p");
+        p.textContent = pin.text;
+        el.appendChild(p);
       }
 
       if (pin.image) {
@@ -158,6 +217,18 @@
         img.src = pin.image;
         el.appendChild(img);
       }
+
+      if (pin.tags?.length) {
+        const tag = document.createElement("small");
+        tag.textContent = "🏷 " + pin.tags.join(", ");
+        el.appendChild(tag);
+      }
+
+      el.onclick = e => {
+        e.stopPropagation();
+        selectedPinId = pin.id;
+        render();
+      };
 
       enableDrag(el, pin);
       board.appendChild(el);
@@ -187,6 +258,20 @@
     };
   }
 
+  document.addEventListener("keydown", e => {
+    if (e.ctrlKey && e.key === "z") undo();
+    if (e.ctrlKey && e.key === "y") redo();
+    if (e.key === "Delete" && selectedPinId) {
+      deletePin(selectedPinId);
+    }
+  });
+
+  board.onclick = () => {
+    selectedPinId = null;
+    render();
+  };
+
+  updateSnapshotDropdown();
   render();
 </script>
 
